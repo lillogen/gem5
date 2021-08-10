@@ -52,39 +52,47 @@ from caches import *
 # import the SimpleOpts module
 from common import SimpleOpts
 
+# Set the usage message to display
+SimpleOpts.set_usage("usage: %prog [options] <binary to execute>")
+
+# Finalize the arguments and grab the opts so we can pass it on to our objects
+(opts, args) = SimpleOpts.parse_args()
+
 # get ISA for the default binary to run. This is mostly for simple testing
 isa = str(m5.defines.buildEnv['TARGET_ISA']).lower()
 
 # Default to running 'hello', use the compiled ISA to find the binary
 # grab the specific path to the binary
 thispath = os.path.dirname(os.path.realpath(__file__))
-default_binary = os.path.join(thispath, '../../../',
-    'tests/test-progs/hello/bin/', isa, 'linux/hello')
+binary = os.path.join(thispath, '../../../',
+                      'tests/test-progs/hello/bin/', isa, 'linux/hello')
 
-# Binary to execute
-SimpleOpts.add_option("binary", nargs='?', default=default_binary)
-
-# Finalize the arguments and grab the args so we can pass it on to our objects
-args = SimpleOpts.parse_args()
+# Check if there was a binary passed in via the command line and error if
+# there are too many arguments
+if len(args) == 1:
+    binary = args[0]
+elif len(args) > 1:
+    SimpleOpts.print_help()
+    m5.fatal("Expected a binary to execute as positional argument")
 
 # create the system we are going to simulate
 system = System()
 
 # Set the clock fequency of the system (and all of its children)
 system.clk_domain = SrcClockDomain()
-system.clk_domain.clock = '1GHz'
+system.clk_domain.clock = '3GHz'
 system.clk_domain.voltage_domain = VoltageDomain()
 
 # Set up the system
 system.mem_mode = 'timing'               # Use timing accesses
-system.mem_ranges = [AddrRange('8192MB')] # Create an address range
+system.mem_ranges = [AddrRange('512MB')] # Create an address range
 
 # Create a simple CPU
-system.cpu = TimingSimpleCPU()
+system.cpu = DerivO3CPU(branchPred=LTAGE())
 
 # Create an L1 instruction and data cache
-system.cpu.icache = L1ICache(args)
-system.cpu.dcache = L1DCache(args)
+system.cpu.icache = L1ICache(opts)
+system.cpu.dcache = L1DCache(opts)
 
 # Connect the instruction and data caches to the CPU
 system.cpu.icache.connectCPU(system.cpu)
@@ -98,7 +106,7 @@ system.cpu.icache.connectBus(system.l2bus)
 system.cpu.dcache.connectBus(system.l2bus)
 
 # Create an L2 cache and connect it to the l2bus
-system.l2cache = L2Cache(args)
+system.l2cache = L2Cache(opts)
 system.l2cache.connectCPUSideBus(system.l2bus)
 
 # Create a memory bus
@@ -126,13 +134,13 @@ system.mem_ctrl.dram = DDR3_1600_8x8()
 system.mem_ctrl.dram.range = system.mem_ranges[0]
 system.mem_ctrl.port = system.membus.mem_side_ports
 
-system.workload = SEWorkload.init_compatible(args.binary)
+system.workload = SEWorkload.init_compatible(binary)
 
 # Create a process for a simple "Hello World" application
 process = Process()
 # Set the command
 # cmd is a list which begins with the executable (like argv)
-process.cmd = [args.binary]
+process.cmd = [binary]
 # Set the cpu to use the process as its workload and create thread contexts
 system.cpu.workload = process
 system.cpu.createThreads()
