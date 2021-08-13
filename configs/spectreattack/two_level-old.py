@@ -44,7 +44,7 @@ import m5
 from m5.objects import *
 
 # Add the common scripts to our path
-m5.util.addToPath('../../')
+m5.util.addToPath('../')
 
 # import the caches which we made
 from caches import *
@@ -52,20 +52,28 @@ from caches import *
 # import the SimpleOpts module
 from common import SimpleOpts
 
+# Set the usage message to display
+SimpleOpts.set_usage("usage: %prog [options] <binary to execute>")
+
+# Finalize the arguments and grab the opts so we can pass it on to our objects
+(opts, args) = SimpleOpts.parse_args()
+
 # get ISA for the default binary to run. This is mostly for simple testing
 isa = str(m5.defines.buildEnv['TARGET_ISA']).lower()
 
 # Default to running 'hello', use the compiled ISA to find the binary
 # grab the specific path to the binary
 thispath = os.path.dirname(os.path.realpath(__file__))
-default_binary = os.path.join(thispath, '../../../',
-    'tests/test-progs/hello/bin/', isa, 'linux/hello')
+binary = os.path.join(thispath, '../../',
+                      'tests/test-progs/hello/bin/', isa, 'linux/hello')
 
-# Binary to execute
-SimpleOpts.add_option("binary", nargs='?', default=default_binary)
-
-# Finalize the arguments and grab the args so we can pass it on to our objects
-args = SimpleOpts.parse_args()
+# Check if there was a binary passed in via the command line and error if
+# there are too many arguments
+if len(args) == 1:
+    binary = args[0]
+elif len(args) > 1:
+    SimpleOpts.print_help()
+    m5.fatal("Expected a binary to execute as positional argument")
 
 # create the system we are going to simulate
 system = System()
@@ -83,8 +91,8 @@ system.mem_ranges = [AddrRange('8192MB')] # Create an address range
 system.cpu = DerivO3CPU(branchPred=LTAGE())
 
 # Create an L1 instruction and data cache
-system.cpu.icache = L1ICache(args)
-system.cpu.dcache = L1DCache(args)
+system.cpu.icache = L1ICache(opts)
+system.cpu.dcache = L1DCache(opts)
 
 # Connect the instruction and data caches to the CPU
 system.cpu.icache.connectCPU(system.cpu)
@@ -98,7 +106,7 @@ system.cpu.icache.connectBus(system.l2bus)
 system.cpu.dcache.connectBus(system.l2bus)
 
 # Create an L2 cache and connect it to the l2bus
-system.l2cache = L2Cache(args)
+system.l2cache = L2Cache(opts)
 system.l2cache.connectCPUSideBus(system.l2bus)
 
 # Create a memory bus
@@ -113,26 +121,26 @@ system.cpu.createInterruptController()
 # For x86 only, make sure the interrupts are connected to the memory
 # Note: these are directly connected to the memory bus and are not cached
 if m5.defines.buildEnv['TARGET_ISA'] == "x86":
-    system.cpu.interrupts[0].pio = system.membus.mem_side_ports
-    system.cpu.interrupts[0].int_requestor = system.membus.cpu_side_ports
-    system.cpu.interrupts[0].int_responder = system.membus.mem_side_ports
+    system.cpu.interrupts[0].pio = system.membus.master
+    system.cpu.interrupts[0].int_master = system.membus.slave
+    system.cpu.interrupts[0].int_slave = system.membus.master
 
 # Connect the system up to the membus
-system.system_port = system.membus.cpu_side_ports
+system.system_port = system.membus.slave
 
 # Create a DDR3 memory controller
 system.mem_ctrl = MemCtrl()
 system.mem_ctrl.dram = DDR3_1600_8x8()
 system.mem_ctrl.dram.range = system.mem_ranges[0]
-system.mem_ctrl.port = system.membus.mem_side_ports
+system.mem_ctrl.port = system.membus.master
 
-system.workload = SEWorkload.init_compatible(args.binary)
+system.workload = SEWorkload.init_compatible(binary)
 
 # Create a process for a simple "Hello World" application
 process = Process()
 # Set the command
 # cmd is a list which begins with the executable (like argv)
-process.cmd = [args.binary]
+process.cmd = [binary]
 # Set the cpu to use the process as its workload and create thread contexts
 system.cpu.workload = process
 system.cpu.createThreads()
